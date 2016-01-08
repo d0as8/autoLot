@@ -7,17 +7,10 @@
 #property version   "2.00"
 #property strict
 
-
-input double inMaxPart    = 0.02;   //Максимальная доля от свободной маржи на сделку
-input double inCommission = 0.01;  //Комиссия (доля от стоимости 1 лота в базовой валюте)
-input int    inStopLoss   = 100;   //Стоп лосс (пипс)
-input double inTakeProfit = 2.0;   //Тейк профит (доля от стоп лосс)
-input bool   inAsk        = true;  //Подтверждать сделку
-
 class Error {
 
    public:
-   
+
       static string Msg( int code ) {
          switch ( code ) {
             case 0    : return( "0 - Нет ошибки" ); break;
@@ -171,9 +164,29 @@ class Error {
             case 5202 : return( "5202 - Превышен таймаут получения данных" ); break;
             case 5203 : return( "5203 - Ошибка в результате выполнения HTTP запроса" ); break;
          };
-         
+
          return( IntegerToString( code ) + " - Неизвестная ошибка"  );
       }
+};
+
+class Price {
+
+   public:
+      
+      double price;
+      double TP;
+      double SL;
+      
+   Price( double p, double tp, double sl ) {
+      Init( p, tp, sl );
+   }
+   
+   void Init( double p, double tp, double sl ) {
+      this.price = p;
+      this.TP    = tp;
+      this.SL    = sl;
+   }
+   
 };
 
 class Order {
@@ -181,62 +194,69 @@ class Order {
    private:
 
       double freeMargin;
-      double priceTP;
-      double priceSL;
       double lot;
-      double lotNormal;
-
+      Price * _Ask;
+      Price * _Bid;
+      
       double MAX_PART;
       double COMMISSION;
       int    TP;
-      int    SL;     
+      int    SL;
+      double PRICE_TP;
+      double PRICE_SL;
       double LOT_COST;  // Стоимость 1 лота в базовой валюте.
       double QUOTATION; // Котировка
-      
+
+      double PRESOLVE;
+
    public:
 
       Order( double maxPart, double commision, int stopLoss, double takeProfit ) {
          MAX_PART    = maxPart;
-         COMMISSION  = commision;       
+         COMMISSION  = commision;
          QUOTATION   = GetQuotation();
-         LOT_COST    = MarketInfo( Symbol(), MODE_LOTSIZE ) / AccountLeverage();  
+         LOT_COST    = MarketInfo( Symbol(), MODE_LOTSIZE ) / AccountLeverage();
          SL          = stopLoss;
          TP          = (int)( stopLoss * takeProfit );
-         
+         PRICE_SL    = NormalizeDouble( SL * Point, Digits );
+         PRICE_TP    = NormalizeDouble( TP * Point, Digits );
+         PRESOLVE    = MAX_PART / LOT_COST / AccountLeverage() / ( SL * Point / QUOTATION +  COMMISSION / AccountLeverage() );
+
+         _Ask = new Price( 0, 0, 0 );
+         _Bid = new Price( 0, 0, 0 );
+
          Recalc();
       }
-     
+
+      ~Order() {
+         delete( _Bid );
+         delete( _Ask );
+      }
+
       void Recalc() {
          freeMargin = AccountFreeMargin();
 
-         lot = freeMargin * MAX_PART / LOT_COST / AccountLeverage() / ( SL * Point / QUOTATION +  COMMISSION / AccountLeverage() );
-
-         lotNormal = lot;
+         lot = freeMargin * PRESOLVE;
          
-         double minLot = MarketInfo( Symbol(), MODE_MINLOT );
-         double maxLot = MarketInfo( Symbol(), MODE_MAXLOT );
-         if ( minLot > lotNormal )
-           lotNormal = minLot;
-         if ( maxLot < lotNormal )
-           lotNormal = maxLot;
-
-         lotNormal = Normalize( lotNormal, 2 );
-         priceSL  = NormalizeDouble( SL * Point, Digits );
-         priceTP  = NormalizeDouble( TP * Point, Digits );  
+         double a = Ask;
+         _Ask.Init( a, a + PRICE_TP, a - PRICE_SL );
+         
+         double b = Bid;
+         _Bid.Init( b, b - PRICE_TP, b + PRICE_SL );
       }
 
       static double Normalize( double value, int numbers = 2 ) {
-         return( NormalizeDouble( value, numbers ) );
+         return( NormalizeDouble( ((int)(value * MathPow( 10 , numbers ) )) / MathPow( 10, numbers ), numbers ) );
       }
-   
+
       static double GetQuotation() {
          string currency = AccountCurrency();
          string profit   = SymbolInfoString( Symbol(), SYMBOL_CURRENCY_PROFIT );
-      
+
          double res = 1.0;
          if ( 0 == StringCompare( currency, profit ) )
             return( res );
-      
+
          ResetLastError();
          res = MarketInfo( StringConcatenate( currency, profit ), MODE_ASK );
          if ( 4106 == GetLastError() ) {
@@ -245,50 +265,71 @@ class Order {
             if ( 0 != GetLastError() )
                Alert(  __FUNCTION__, ": ", Error::Msg( GetLastError() ) );
          }
-         
+
          return( NormalizeDouble( res, Digits ) );
       }
-      
+
       string GetOrderComment() {
          string res = StringFormat(
-            "MP%G FM%G LOT%G ",
-            MAX_PART, freeMargin, lotNormal
+            "MP%G FM%G SL%G LOT%G",
+            MAX_PART, freeMargin, SL, Lot()
          );
-         
+
          return( res );
       }
 
       string GetComment() {
-         string res = StringFormat( 
+         double lotNormal = Lot();
+         string currency  = AccountCurrency();
+         double tickValue = lotNormal * MarketInfo( Symbol(), MODE_TICKVALUE );
+
+         string res = StringFormat(
             "%-11s = %G %% (%G %s)\n%-11s = %G %% (%G %s)\n%-11s = %G pips (%G %s)\n%-11s = %G pips (%G %s)\n%-11s = %G (%G)\n",
-            "maxPart",    MAX_PART * 100,   Normalize( MAX_PART * freeMargin ),             AccountCurrency(),
-            "commission", COMMISSION * 100, Normalize( COMMISSION * LOT_COST * lotNormal ), AccountCurrency(),
-            "stopLoss",   SL, SL * lotNormal * MarketInfo( Symbol(), MODE_TICKVALUE ),      AccountCurrency(),
-            "takeProfit", TP, TP * lotNormal * MarketInfo( Symbol(), MODE_TICKVALUE ),      AccountCurrency(),
+            "maxPart",    MAX_PART   * 100, Normalize( MAX_PART * freeMargin ),             currency,
+            "commission", COMMISSION * 100, Normalize( COMMISSION * LOT_COST * lotNormal ), currency,
+            "stopLoss",   SL, Normalize( SL * tickValue ),                                  currency,
+            "takeProfit", TP, Normalize( TP * tickValue ),                                  currency,
             "LOT",        lotNormal, lot
          );
-   
+
          return( res );
-      };
-     
+      }
+
       double PriceTP() {
-         return priceTP;
-      };
-      
+         return PRICE_TP;
+      }
+
       double PriceSL() {
-         return priceSL;
-      };
-      
+         return PRICE_SL;
+      }
+
       double Lot() {
-         return lotNormal;
-      };
+         double lotNormal = lot;
+
+         double minLot = MarketInfo( Symbol(), MODE_MINLOT );
+         double maxLot = MarketInfo( Symbol(), MODE_MAXLOT );
+         if ( minLot > lotNormal )
+           lotNormal = minLot;
+         if ( maxLot < lotNormal )
+           lotNormal = maxLot;
+
+         return Normalize( lotNormal );
+      }
+
+      Price * GetAsk() {
+         return( _Ask );
+      }
+      
+      Price * GetBid() {
+         return( _Bid );
+      }
 };
 
 class Drawer {
 
    private:
-   
-      Order *order;
+
+      Order * order;
 
       bool ASK;
 
@@ -298,13 +339,13 @@ class Drawer {
       string BUY_TP_HLINE;
       string SELL_SL_HLINE;
       string SELL_TP_HLINE;
-      
+
    public:
-   
+
       Drawer(Order *order, bool ask) {
          this.order = order;
          this.ASK   = ask;
-         
+
          BUY_BUTTON    = "AUTOLOT_BUY_BUTTON";
          SELL_BUTTON   = "AUTOLOT_SELL_BUTTON";
          BUY_SL_HLINE  = "AUTOLOT_BUY_SL_HLINE";
@@ -314,10 +355,10 @@ class Drawer {
 
          CreateButton( BUY_BUTTON,    "BUY",  clrMidnightBlue, 70, 20 );
          CreateButton( SELL_BUTTON,   "SELL", clrDarkRed,  70, 45 );
-         CreateLine ( SELL_TP_HLINE, clrDarkRed );
-         CreateLine ( BUY_TP_HLINE,  clrMidnightBlue );
-         CreateLine ( SELL_SL_HLINE, clrDarkRed );
-         CreateLine ( BUY_SL_HLINE,  clrMidnightBlue );
+         CreateLine(   SELL_TP_HLINE, clrDarkRed );
+         CreateLine(   BUY_TP_HLINE,  clrMidnightBlue );
+         CreateLine(   SELL_SL_HLINE, clrDarkRed );
+         CreateLine(   BUY_SL_HLINE,  clrMidnightBlue );
       }
 
       ~Drawer() {
@@ -331,65 +372,59 @@ class Drawer {
 
       void Update() {
          order.Recalc();
-         
-         double priceAsk = Ask;
-         double priceBid = Bid;
-      
-         MoveLine( BUY_TP_HLINE,  priceAsk + order.PriceTP() );
-         MoveLine( SELL_TP_HLINE, priceBid - order.PriceTP() );
-         
-         MoveLine( SELL_SL_HLINE, priceAsk + order.PriceSL() );
-         MoveLine( BUY_SL_HLINE,  priceBid - order.PriceSL() );
-         
-         Comment( order.GetComment() );          
+
+         MoveLine( BUY_TP_HLINE,  order.GetAsk().TP );
+         MoveLine( SELL_TP_HLINE, order.GetBid().TP );
+         MoveLine( BUY_SL_HLINE,  order.GetAsk().SL );
+         MoveLine( SELL_SL_HLINE, order.GetBid().SL );
+
+         Comment( order.GetComment() );
      }
 
       void OnButtonClick( const string &buttonName ) {
          if ( BUY_BUTTON != buttonName && SELL_BUTTON != buttonName ) return;
 
          order.Recalc();
-         
+
          if ( !ASK || IDYES == MessageBox( order.GetComment(), buttonName, MB_YESNO ) ) {
-            
-            double priceAsk = Ask;
-            double priceBid = Bid;
-      
             ResetLastError();
-            
+
+            order.Recalc();
+
             int orderId = -1;
             if ( BUY_BUTTON == buttonName )
-               orderId = OrderSend( 
+               orderId = OrderSend(
                   Symbol(),
                   OP_BUY,
                   order.Lot(),
-                  priceAsk,
+                  order.GetAsk().price,
                   0,
-                  priceBid - order.PriceSL(),
-                  priceAsk + order.PriceTP(),
-                  order.GetOrderComment(), 
+                  order.GetAsk().SL,
+                  order.GetAsk().TP,
+                  order.GetOrderComment(),
                   0, 0, clrBlue );
             else
-               orderId = OrderSend( 
+               orderId = OrderSend(
                   Symbol(),
                   OP_SELL,
                   order.Lot(),
-                  priceBid,
+                  order.GetBid().price,
                   0,
-                  priceAsk + order.PriceSL(),
-                  priceBid - order.PriceTP(),
+                  order.GetBid().SL,
+                  order.GetBid().TP,
                   order.GetOrderComment(),
                   0, 0, clrRed );
-      
+                     
             if ( 0 > orderId ) {
                PlaySound( "timeout.wav" );
-               
+
                string s1 = "OrderSend: " + Error::Msg( GetLastError() );
-               Alert( s1 );         
+               Alert( s1 );
                MessageBox( s1 );
             } else
                PlaySound( "Ok.wav" );
          }
-         
+
          ObjectSetInteger( 0, buttonName, OBJPROP_STATE, false );
          ChartRedraw();
       }
@@ -408,10 +443,10 @@ class Drawer {
          ObjectSetString ( 0, id, OBJPROP_FONT,      "Arial" );
          ObjectSetInteger( 0, id, OBJPROP_FONTSIZE,  10 );
          ObjectSetString ( 0, id, OBJPROP_TEXT,      name );
-           
+
          return( true );
       }
-      
+
       bool CreateLine( string id, int clr ) {
          ObjectCreate(     0, id, OBJ_HLINE,         0, 0, 0 );
          ObjectSetInteger( 0, id, OBJPROP_COLOR,     clr );
@@ -421,42 +456,48 @@ class Drawer {
          ObjectSetInteger( 0, id, OBJPROP_SELECTABLE,false );
          ObjectSetInteger( 0, id, OBJPROP_SELECTED,  false );
          ObjectSetInteger( 0, id, OBJPROP_HIDDEN,    true );
-      
+
          return( true );
       }
-      
+
       bool MoveLine( string id, double price ) {
          if ( -1 == ObjectFind( 0, id ) ) return( false );
-      
+
          ObjectSetDouble( 0, id, OBJPROP_PRICE, price );
-         
+
          return( true );
       }
-      
+
       bool EraseObject( string id ) {
          if ( -1 == ObjectFind( 0, id ) ) return( true );
-      
+
          if( !ObjectDelete( 0, id ) ) {
             Alert( __FUNCTION__, ": ", Error::Msg( GetLastError() ) );
             return( false );
          }
-      
+
          return( true );
       }
 
 };
 
-Drawer *drawer;
+Drawer * drawer;
 
 // Events
 
+input double inMaxPart    = 0.01;  //Максимальная доля от свободной маржи на сделку
+input double inCommission = 0.01;  //Комиссия (доля от стоимости 1 лота в базовой валюте)
+input int    inStopLoss   = 100;   //Стоп лосс (пипс)
+input double inTakeProfit = 2.0;   //Тейк профит (доля от стоп лосс)
+input bool   inAsk        = true;  //Подтверждение открытия сделки
+
 int OnInit() {
-   drawer = new Drawer(new Order( inMaxPart, inCommission, inStopLoss, inTakeProfit ), inAsk ); 
+   drawer = new Drawer(new Order( inMaxPart, inCommission, inStopLoss, inTakeProfit ), inAsk );
 
    if ( EventSetMillisecondTimer( 500 ) ) {
       OnTimer();
       return( INIT_SUCCEEDED );
-   } else 
+   } else
       return( INIT_FAILED );
 }
 
