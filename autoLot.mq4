@@ -195,8 +195,8 @@ class Order {
 
       double freeMargin;
       double lot;
-      Price * _Ask;
-      Price * _Bid;
+      Price * ask;
+      Price * bid;
       
       double MAX_PART;
       double COMMISSION;
@@ -222,15 +222,15 @@ class Order {
          PRICE_TP    = NormalizeDouble( TP * Point, Digits );
          PRESOLVE    = MAX_PART / LOT_COST / AccountLeverage() / ( SL * Point / QUOTATION +  COMMISSION / AccountLeverage() );
 
-         _Ask = new Price( 0, 0, 0 );
-         _Bid = new Price( 0, 0, 0 );
+         ask = new Price( 0, 0, 0 );
+         bid = new Price( 0, 0, 0 );
 
          Recalc();
       }
 
       ~Order() {
-         delete( _Bid );
-         delete( _Ask );
+         delete( bid );
+         delete( ask );
       }
 
       void Recalc() {
@@ -239,10 +239,10 @@ class Order {
          lot = freeMargin * PRESOLVE;
          
          double a = Ask;
-         _Ask.Init( a, a + PRICE_TP, a - PRICE_SL );
+         ask.Init( a, a + PRICE_TP, a - PRICE_SL );
          
          double b = Bid;
-         _Bid.Init( b, b - PRICE_TP, b + PRICE_SL );
+         bid.Init( b, b - PRICE_TP, b + PRICE_SL );
       }
 
       static double Normalize( double value, int numbers = 2 ) {
@@ -317,11 +317,11 @@ class Order {
       }
 
       Price * GetAsk() {
-         return( _Ask );
+         return( ask );
       }
       
       Price * GetBid() {
-         return( _Bid );
+         return( bid );
       }
 };
 
