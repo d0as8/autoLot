@@ -235,6 +235,7 @@ class Order {
 
       void Recalc() {
          freeMargin = AccountFreeMargin();
+         if ( 0 > freeMargin ) freeMargin = 0;
 
          lot = freeMargin * PRESOLVE;
          
