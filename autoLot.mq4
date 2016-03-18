@@ -172,21 +172,46 @@ class Error {
 class Price {
 
    public:
-      
-      double price;
-      double TP;
-      double SL;
-      
-   Price( double p, double tp, double sl ) {
-      Init( p, tp, sl );
+
+      double ask;
+      double bid;
+      double stopLoss;
+      double takeProfit;
+
+   Price( double stopLoss = 0.0, double takeProfit = 0.0, double ask = 0.0, double bid = 0.0 ) {
+      Update( stopLoss, takeProfit, ask, bid );
    }
-   
-   void Init( double p, double tp, double sl ) {
-      this.price = p;
-      this.TP    = tp;
-      this.SL    = sl;
+
+   void Update( double stopLoss, double takeProfit, double ask, double bid ) {
+      this.stopLoss   = stopLoss;
+      this.takeProfit = takeProfit;
+      this.ask        = ask;
+      this.bid        = bid;
    }
-   
+
+   double GetBuyPrice() {
+      return( ask );
+   }
+
+   double GetBuySL() {
+      return( bid - stopLoss );
+   }
+
+   double GetBuyTP() {
+      return( bid + takeProfit );
+   }
+
+   double GetSellPrice() {
+      return( bid );
+   }
+
+   double GetSellSL() {
+      return( ask + stopLoss );
+   }
+
+   double GetSellTP() {
+      return( ask - takeProfit );
+   }
 };
 
 class Order {
@@ -194,56 +219,63 @@ class Order {
    private:
 
       double freeMargin;
+      double priceSL;
+      double priceTP;
       double lot;
-      Price * ask;
-      Price * bid;
-      
+      double tickValue;
+      Price * price;
+
+      int    ATR;
       double MAX_PART;
       double COMMISSION;
-      int    TP;
-      int    SL;
-      double PRICE_TP;
-      double PRICE_SL;
+      double FACTOR_SL;
+      double FACTOR_TP;
       double LOT_COST;  // Стоимость 1 лота в базовой валюте.
       double QUOTATION; // Котировка
-
-      double PRESOLVE;
+      double LOT_MIN;
+      double LOT_MAX;
+         
+      double PRESOLVE1;
+      double PRESOLVE2;
 
    public:
 
-      Order( double maxPart, double commision, int stopLoss, double takeProfit ) {
-         MAX_PART    = maxPart;
-         COMMISSION  = commision;
-         QUOTATION   = GetQuotation();
-         LOT_COST    = MarketInfo( Symbol(), MODE_LOTSIZE ) / AccountLeverage();
-         SL          = stopLoss;
-         TP          = (int)( stopLoss * takeProfit );
-         PRICE_SL    = NormalizeDouble( SL * Point, Digits );
-         PRICE_TP    = NormalizeDouble( TP * Point, Digits );
-         PRESOLVE    = MAX_PART / LOT_COST / AccountLeverage() / ( SL * Point / QUOTATION +  COMMISSION / AccountLeverage() );
+      Order( double maxPart, double factorTP, double commision, double factorSL, int atr = 14 ) {
+         ATR        = atr;
+         MAX_PART   = maxPart;
+         FACTOR_TP  = factorTP;
+         COMMISSION = commision;
+         FACTOR_SL  = factorSL;
 
-         ask = new Price( 0, 0, 0 );
-         bid = new Price( 0, 0, 0 );
+         QUOTATION = GetQuotation();
+         LOT_COST  = MarketInfo( NULL, MODE_LOTSIZE ) / AccountLeverage();
+         LOT_MIN   = MarketInfo( NULL, MODE_MINLOT );
+         LOT_MAX   = MarketInfo( NULL, MODE_MAXLOT );
+         PRESOLVE1 = MAX_PART / LOT_COST / AccountLeverage();
+         PRESOLVE2 = COMMISSION / AccountLeverage();
 
-         Recalc();
+         price = new Price( 0, 0, 0, 0 );
+
+         Update();
       }
 
       ~Order() {
-         delete( bid );
-         delete( ask );
+         delete( price );
       }
 
-      void Recalc() {
+      void Update() {
          freeMargin = AccountFreeMargin();
          if ( 0 > freeMargin ) freeMargin = 0;
 
-         lot = freeMargin * PRESOLVE;
-         
-         double a = Ask;
-         ask.Init( a, a + PRICE_TP, a - PRICE_SL );
-         
-         double b = Bid;
-         bid.Init( b, b - PRICE_TP, b + PRICE_SL );
+         priceSL   = FACTOR_SL  * MathAbs( iATR( NULL, 0, ATR, 0 ) );
+         lot       = freeMargin * PRESOLVE1 / ( priceSL / QUOTATION + PRESOLVE2 );
+         if ( LOT_MIN > lot ) lot = LOT_MIN;
+         if ( LOT_MAX < lot ) lot = LOT_MAX;
+
+         tickValue = MarketInfo( NULL, MODE_TICKVALUE );
+         priceTP = FACTOR_TP * ( COMMISSION * LOT_COST * Point / tickValue + priceSL );
+
+         price.Update( priceSL, priceTP, Ask, Bid );
       }
 
       static double Normalize( double value, int numbers = 2 ) {
@@ -252,7 +284,7 @@ class Order {
 
       static double GetQuotation() {
          string currency = AccountCurrency();
-         string profit   = SymbolInfoString( Symbol(), SYMBOL_CURRENCY_PROFIT );
+         string profit   = SymbolInfoString( NULL, SYMBOL_CURRENCY_PROFIT );
 
          double res = 1.0;
          if ( 0 == StringCompare( currency, profit ) )
@@ -273,56 +305,34 @@ class Order {
       string GetOrderComment() {
          string res = StringFormat(
             "MP%G FM%G SL%G LOT%G",
-            MAX_PART, freeMargin, SL, Lot()
+            MAX_PART, freeMargin, priceSL, lot
          );
 
          return( res );
       }
 
       string GetComment() {
-         double lotNormal = Lot();
          string currency  = AccountCurrency();
-         double tickValue = lotNormal * MarketInfo( Symbol(), MODE_TICKVALUE );
+         double tick      = lot * tickValue / Point;
 
          string res = StringFormat(
-            "%-11s = %G %% (%G %s)\n%-11s = %G %% (%G %s)\n%-11s = %G pips (%G %s)\n%-11s = %G pips (%G %s)\n%-11s = %G (%G)\n",
-            "maxPart",    MAX_PART   * 100, Normalize( MAX_PART * freeMargin ),             currency,
-            "commission", COMMISSION * 100, Normalize( COMMISSION * LOT_COST * lotNormal ), currency,
-            "stopLoss",   SL, Normalize( SL * tickValue ),                                  currency,
-            "takeProfit", TP, Normalize( TP * tickValue ),                                  currency,
-            "LOT",        lotNormal, lot
+            "%-11s = %G %% (%G %s)\n%-11s = %G %% (%G %s)\n%-11s = %G (%G %s)\n%-11s = %G (%G %s)\n%-11s = %G (%G)\n",
+            "maxPart",    MAX_PART   * 100,                   NormalizeDouble( MAX_PART * freeMargin, 2 ),       currency,
+            "commission", COMMISSION * 100,                   NormalizeDouble( COMMISSION * LOT_COST * lot, 2 ), currency,
+            "stopLoss",   NormalizeDouble( priceSL, Digits ), NormalizeDouble( priceSL * tick, 2 ),              currency,
+            "takeProfit", NormalizeDouble( priceTP, Digits ), NormalizeDouble( priceTP * tick, 2 ),              currency,
+            "LOT",        GetLot(), lot
          );
 
          return( res );
       }
 
-      double PriceTP() {
-         return PRICE_TP;
+      double GetLot() {
+         return( Normalize( lot ) );
       }
 
-      double PriceSL() {
-         return PRICE_SL;
-      }
-
-      double Lot() {
-         double lotNormal = lot;
-
-         double minLot = MarketInfo( Symbol(), MODE_MINLOT );
-         double maxLot = MarketInfo( Symbol(), MODE_MAXLOT );
-         if ( minLot > lotNormal )
-           lotNormal = minLot;
-         if ( maxLot < lotNormal )
-           lotNormal = maxLot;
-
-         return Normalize( lotNormal );
-      }
-
-      Price * GetAsk() {
-         return( ask );
-      }
-      
-      Price * GetBid() {
-         return( bid );
+      Price * GetPrice() {
+         return( price );
       }
 };
 
@@ -372,12 +382,12 @@ class Drawer {
       }
 
       void Update() {
-         order.Recalc();
+         order.Update();
 
-         MoveLine( BUY_TP_HLINE,  order.GetAsk().TP );
-         MoveLine( SELL_TP_HLINE, order.GetBid().TP );
-         MoveLine( BUY_SL_HLINE,  order.GetAsk().SL );
-         MoveLine( SELL_SL_HLINE, order.GetBid().SL );
+         MoveLine( BUY_TP_HLINE,  order.GetPrice().GetBuyTP() );
+         MoveLine( SELL_TP_HLINE, order.GetPrice().GetSellTP() );
+         MoveLine( BUY_SL_HLINE,  order.GetPrice().GetBuySL() );
+         MoveLine( SELL_SL_HLINE, order.GetPrice().GetSellSL() );
 
          Comment( order.GetComment() );
      }
@@ -385,37 +395,37 @@ class Drawer {
       void OnButtonClick( const string &buttonName ) {
          if ( BUY_BUTTON != buttonName && SELL_BUTTON != buttonName ) return;
 
-         order.Recalc();
+         order.Update();
 
          if ( !ASK || IDYES == MessageBox( order.GetComment(), buttonName, MB_YESNO ) ) {
             ResetLastError();
 
-            order.Recalc();
+            order.Update();
 
             int orderId = -1;
             if ( BUY_BUTTON == buttonName )
                orderId = OrderSend(
-                  Symbol(),
+                  NULL,
                   OP_BUY,
-                  order.Lot(),
-                  order.GetAsk().price,
+                  order.GetLot(),
+                  order.GetPrice().GetBuyPrice(),
                   0,
-                  order.GetAsk().SL,
-                  order.GetAsk().TP,
+                  order.GetPrice().GetBuySL(),
+                  order.GetPrice().GetBuyTP(),
                   order.GetOrderComment(),
                   0, 0, clrBlue );
             else
                orderId = OrderSend(
-                  Symbol(),
+                  NULL,
                   OP_SELL,
-                  order.Lot(),
-                  order.GetBid().price,
+                  order.GetLot(),
+                  order.GetPrice().GetSellPrice(),
                   0,
-                  order.GetBid().SL,
-                  order.GetBid().TP,
+                  order.GetPrice().GetSellSL(),
+                  order.GetPrice().GetSellTP(),
                   order.GetOrderComment(),
                   0, 0, clrRed );
-                     
+
             if ( 0 > orderId ) {
                PlaySound( "timeout.wav" );
 
@@ -482,18 +492,20 @@ class Drawer {
 
 };
 
+Order  * order;
 Drawer * drawer;
 
 // Events
 
 input double inMaxPart    = 0.01;  //Максимальная доля от свободной маржи на сделку
+input double inTakeProfit = 2.0;   //Профит (доля от суммы сделки)
 input double inCommission = 0.01;  //Комиссия (доля от стоимости 1 лота в базовой валюте)
-input int    inStopLoss   = 100;   //Стоп лосс (пипс)
-input double inTakeProfit = 2.0;   //Тейк профит (доля от стоп лосс)
+input double inStopLoss   = 2.0;   //Стоп лосс (доля от ATR(14))
 input bool   inAsk        = true;  //Подтверждение открытия сделки
 
 int OnInit() {
-   drawer = new Drawer(new Order( inMaxPart, inCommission, inStopLoss, inTakeProfit ), inAsk );
+   order  = new Order( inMaxPart, inTakeProfit, inCommission, inStopLoss );
+   drawer = new Drawer( order, inAsk );
 
    if ( EventSetMillisecondTimer( 500 ) ) {
       OnTimer();
@@ -510,6 +522,7 @@ void OnDeinit( const int reason ) {
    EventKillTimer();
 
    delete( drawer );
+   delete( order );
 }
 
 void OnChartEvent( const int id, const long &lparam, const double &dparam, const string &sparam ) {
