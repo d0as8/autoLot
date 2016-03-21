@@ -269,10 +269,12 @@ class Order {
 
          priceSL   = FACTOR_SL  * MathAbs( iATR( NULL, 0, ATR, 0 ) );
          lot       = freeMargin * PRESOLVE1 / ( priceSL / QUOTATION + PRESOLVE2 );
+
          if ( LOT_MIN > lot ) lot = LOT_MIN;
          if ( LOT_MAX < lot ) lot = LOT_MAX;
+         lot = Normalize( lot, 2 );
 
-         tickValue = MarketInfo( NULL, MODE_TICKVALUE );
+         tickValue = MarketInfo( NULL, MODE_TICKVALUE );            
          priceTP = FACTOR_TP * ( COMMISSION * LOT_COST * Point / tickValue + priceSL );
 
          price.Update( priceSL, priceTP, Ask, Bid );
@@ -316,19 +318,19 @@ class Order {
          double tick      = lot * tickValue / Point;
 
          string res = StringFormat(
-            "%-11s = %G %% (%G %s)\n%-11s = %G %% (%G %s)\n%-11s = %G (%G %s)\n%-11s = %G (%G %s)\n%-11s = %G (%G)\n",
+            "%-11s = %G %% (%G %s)\n%-11s = %G %% (%G %s)\n%-11s = %G (%G %s)\n%-11s = %G (%G %s)\n%-11s = %G",
             "maxPart",    MAX_PART   * 100,                   NormalizeDouble( MAX_PART * freeMargin, 2 ),       currency,
             "commission", COMMISSION * 100,                   NormalizeDouble( COMMISSION * LOT_COST * lot, 2 ), currency,
             "stopLoss",   NormalizeDouble( priceSL, Digits ), NormalizeDouble( priceSL * tick, 2 ),              currency,
             "takeProfit", NormalizeDouble( priceTP, Digits ), NormalizeDouble( priceTP * tick, 2 ),              currency,
-            "LOT",        GetLot(), lot
+            "LOT",        lot
          );
 
          return( res );
       }
 
       double GetLot() {
-         return( Normalize( lot ) );
+         return( lot );
       }
 
       Price * GetPrice() {
