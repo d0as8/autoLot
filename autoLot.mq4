@@ -171,46 +171,48 @@ class Error {
 
 class Price {
 
-   public:
+   private:
 
-      double ask;
-      double bid;
-      double stopLoss;
-      double takeProfit;
+      double mAsk;
+      double mBid;
+      double mStopLoss;
+      double mTakeProfit;
+
+   public:
 
    Price( double stopLoss = 0.0, double takeProfit = 0.0, double ask = 0.0, double bid = 0.0 ) {
       Update( stopLoss, takeProfit, ask, bid );
    }
 
    void Update( double stopLoss, double takeProfit, double ask, double bid ) {
-      this.stopLoss   = stopLoss;
-      this.takeProfit = takeProfit;
-      this.ask        = ask;
-      this.bid        = bid;
+      this.mStopLoss   = stopLoss;
+      this.mTakeProfit = takeProfit;
+      this.mAsk        = ask;
+      this.mBid        = bid;
    }
 
    double GetBuyPrice() {
-      return( ask );
+      return( mAsk );
    }
 
    double GetBuySL() {
-      return( bid - stopLoss );
+      return( mBid - mStopLoss );
    }
 
    double GetBuyTP() {
-      return( bid + takeProfit );
+      return( mBid + mTakeProfit );
    }
 
    double GetSellPrice() {
-      return( bid );
+      return( mBid );
    }
 
    double GetSellSL() {
-      return( ask + stopLoss );
+      return( mAsk + mStopLoss );
    }
 
    double GetSellTP() {
-      return( ask - takeProfit );
+      return( mAsk - mTakeProfit );
    }
 };
 
@@ -218,12 +220,12 @@ class Order {
 
    private:
 
-      double freeMargin;
-      double priceSL;
-      double priceTP;
-      double lot;
-      double tickValue;
-      Price * price;
+      double mFreeMargin;
+      double mPriceSL;
+      double mPriceTP;
+      double mLot;
+      double mTickValue;
+      Price * pPrice;
 
       int    ATR;
       double MAX_PART;
@@ -233,8 +235,7 @@ class Order {
       double LOT_COST;  // Стоимость 1 лота в базовой валюте.
       double QUOTATION; // Котировка
       double LOT_MIN;
-      double LOT_MAX;
-         
+      double LOT_MAX;        
       double PRESOLVE1;
       double PRESOLVE2;
 
@@ -254,30 +255,30 @@ class Order {
          PRESOLVE1 = MAX_PART / LOT_COST / AccountLeverage();
          PRESOLVE2 = COMMISSION / AccountLeverage();
 
-         price = new Price( 0, 0, 0, 0 );
+         pPrice = new Price( 0, 0, 0, 0 );
 
          Update();
       }
 
       ~Order() {
-         delete( price );
+         delete( pPrice );
       }
 
       void Update() {
-         freeMargin = AccountFreeMargin();
-         if ( 0 > freeMargin ) freeMargin = 0;
+         mFreeMargin = AccountFreeMargin();
+         if ( 0 > mFreeMargin ) mFreeMargin = 0;
 
-         priceSL   = FACTOR_SL  * MathAbs( iATR( NULL, 0, ATR, 0 ) );
-         lot       = freeMargin * PRESOLVE1 / ( priceSL / QUOTATION + PRESOLVE2 );
+         mPriceSL = FACTOR_SL   * MathAbs( iATR( NULL, 0, ATR, 0 ) );
+         mLot     = mFreeMargin * PRESOLVE1 / ( mPriceSL / QUOTATION + PRESOLVE2 );
 
-         if ( LOT_MIN > lot ) lot = LOT_MIN;
-         if ( LOT_MAX < lot ) lot = LOT_MAX;
-         lot = Normalize( lot, 2 );
+         if ( LOT_MIN > mLot ) mLot = LOT_MIN;
+         if ( LOT_MAX < mLot ) mLot = LOT_MAX;
+         mLot = Normalize( mLot );
 
-         tickValue = MarketInfo( NULL, MODE_TICKVALUE );            
-         priceTP = FACTOR_TP * ( COMMISSION * LOT_COST * Point / tickValue + priceSL );
+         mTickValue = MarketInfo( NULL, MODE_TICKVALUE );            
+         mPriceTP   = FACTOR_TP * ( COMMISSION * LOT_COST * Point / mTickValue + mPriceSL );
 
-         price.Update( priceSL, priceTP, Ask, Bid );
+         pPrice.Update( mPriceSL, mPriceTP, Ask, Bid );
       }
 
       static double Normalize( double value, int numbers = 2 ) {
@@ -306,8 +307,8 @@ class Order {
 
       string GetOrderComment() {
          string res = StringFormat(
-            "MP%G FM%G SL%G LOT%G",
-            MAX_PART, freeMargin, priceSL, lot
+            "MP%G FM%G",
+            MAX_PART, mFreeMargin
          );
 
          return( res );
@@ -315,26 +316,26 @@ class Order {
 
       string GetComment() {
          string currency  = AccountCurrency();
-         double tick      = lot * tickValue / Point;
+         double tick      = mLot * mTickValue / Point;
 
          string res = StringFormat(
             "%-11s = %G %% (%G %s)\n%-11s = %G %% (%G %s)\n%-11s = %G (%G %s)\n%-11s = %G (%G %s)\n%-11s = %G",
-            "maxPart",    MAX_PART   * 100,                   NormalizeDouble( MAX_PART * freeMargin, 2 ),       currency,
-            "commission", COMMISSION * 100,                   NormalizeDouble( COMMISSION * LOT_COST * lot, 2 ), currency,
-            "stopLoss",   NormalizeDouble( priceSL, Digits ), NormalizeDouble( priceSL * tick, 2 ),              currency,
-            "takeProfit", NormalizeDouble( priceTP, Digits ), NormalizeDouble( priceTP * tick, 2 ),              currency,
-            "LOT",        lot
+            "maxPart",    MAX_PART   * 100,                    NormalizeDouble( MAX_PART * mFreeMargin, 2 ),       currency,
+            "commission", COMMISSION * 100,                    NormalizeDouble( COMMISSION * LOT_COST * mLot, 2 ), currency,
+            "stopLoss",   NormalizeDouble( mPriceSL, Digits ), NormalizeDouble( mPriceSL * tick, 2 ),              currency,
+            "takeProfit", NormalizeDouble( mPriceTP, Digits ), NormalizeDouble( mPriceTP * tick, 2 ),              currency,
+            "LOT",        mLot
          );
 
          return( res );
       }
 
       double GetLot() {
-         return( lot );
+         return( mLot );
       }
 
       Price * GetPrice() {
-         return( price );
+         return( pPrice );
       }
 };
 
@@ -342,7 +343,7 @@ class Drawer {
 
    private:
 
-      Order * order;
+      Order * pOrder;
 
       bool ASK;
 
@@ -355,9 +356,9 @@ class Drawer {
 
    public:
 
-      Drawer(Order *order, bool ask) {
-         this.order = order;
-         this.ASK   = ask;
+      Drawer( Order * order, bool ask ) {
+         this.pOrder = order;
+         this.ASK    = ask;
 
          BUY_BUTTON    = "AUTOLOT_BUY_BUTTON";
          SELL_BUTTON   = "AUTOLOT_SELL_BUTTON";
@@ -384,48 +385,48 @@ class Drawer {
       }
 
       void Update() {
-         order.Update();
+         pOrder.Update();
 
-         MoveLine( BUY_TP_HLINE,  order.GetPrice().GetBuyTP() );
-         MoveLine( SELL_TP_HLINE, order.GetPrice().GetSellTP() );
-         MoveLine( BUY_SL_HLINE,  order.GetPrice().GetBuySL() );
-         MoveLine( SELL_SL_HLINE, order.GetPrice().GetSellSL() );
+         MoveLine( BUY_TP_HLINE,  pOrder.GetPrice().GetBuyTP() );
+         MoveLine( SELL_TP_HLINE, pOrder.GetPrice().GetSellTP() );
+         MoveLine( BUY_SL_HLINE,  pOrder.GetPrice().GetBuySL() );
+         MoveLine( SELL_SL_HLINE, pOrder.GetPrice().GetSellSL() );
 
-         Comment( order.GetComment() );
+         Comment( pOrder.GetComment() );
      }
 
       void OnButtonClick( const string &buttonName ) {
          if ( BUY_BUTTON != buttonName && SELL_BUTTON != buttonName ) return;
 
-         order.Update();
+         pOrder.Update();
 
-         if ( !ASK || IDYES == MessageBox( order.GetComment(), buttonName, MB_YESNO ) ) {
+         if ( !ASK || IDYES == MessageBox( pOrder.GetComment(), buttonName, MB_YESNO ) ) {
             ResetLastError();
 
-            order.Update();
+            pOrder.Update();
 
             int orderId = -1;
             if ( BUY_BUTTON == buttonName )
                orderId = OrderSend(
                   NULL,
                   OP_BUY,
-                  order.GetLot(),
-                  order.GetPrice().GetBuyPrice(),
+                  pOrder.GetLot(),
+                  pOrder.GetPrice().GetBuyPrice(),
                   0,
-                  order.GetPrice().GetBuySL(),
-                  order.GetPrice().GetBuyTP(),
-                  order.GetOrderComment(),
+                  pOrder.GetPrice().GetBuySL(),
+                  pOrder.GetPrice().GetBuyTP(),
+                  pOrder.GetOrderComment(),
                   0, 0, clrBlue );
             else
                orderId = OrderSend(
                   NULL,
                   OP_SELL,
-                  order.GetLot(),
-                  order.GetPrice().GetSellPrice(),
+                  pOrder.GetLot(),
+                  pOrder.GetPrice().GetSellPrice(),
                   0,
-                  order.GetPrice().GetSellSL(),
-                  order.GetPrice().GetSellTP(),
-                  order.GetOrderComment(),
+                  pOrder.GetPrice().GetSellSL(),
+                  pOrder.GetPrice().GetSellTP(),
+                  pOrder.GetOrderComment(),
                   0, 0, clrRed );
 
             if ( 0 > orderId ) {
@@ -494,9 +495,6 @@ class Drawer {
 
 };
 
-Order  * order;
-Drawer * drawer;
-
 // Events
 
 input double inMaxPart    = 0.01;  //Максимальная доля от свободной маржи на сделку
@@ -505,9 +503,12 @@ input double inCommission = 0.01;  //Комиссия (доля от стоимости 1 лота в базово
 input double inStopLoss   = 2.0;   //Стоп лосс (доля от ATR(14))
 input bool   inAsk        = true;  //Подтверждение открытия сделки
 
+Order  * gOrder;
+Drawer * gDrawer;
+
 int OnInit() {
-   order  = new Order( inMaxPart, inTakeProfit, inCommission, inStopLoss );
-   drawer = new Drawer( order, inAsk );
+   gOrder  = new Order( inMaxPart, inTakeProfit, inCommission, inStopLoss );
+   gDrawer = new Drawer( gOrder, inAsk );
 
    if ( EventSetMillisecondTimer( 500 ) ) {
       OnTimer();
@@ -517,18 +518,18 @@ int OnInit() {
 }
 
 void OnTimer() {
-   drawer.Update();
+   gDrawer.Update();
 }
 
 void OnDeinit( const int reason ) {
    EventKillTimer();
 
-   delete( drawer );
-   delete( order );
+   delete( gDrawer );
+   delete( gOrder );
 }
 
 void OnChartEvent( const int id, const long &lparam, const double &dparam, const string &sparam ) {
    if ( id != CHARTEVENT_OBJECT_CLICK ) return;
 
-   drawer.OnButtonClick( sparam );
+   gDrawer.OnButtonClick( sparam );
 }
