@@ -268,6 +268,7 @@ class Order {
          mFreeMargin = AccountFreeMargin();
          if ( 0 > mFreeMargin ) mFreeMargin = 0;
 
+         // get Lot by SL
          mPriceSL = FACTOR_SL   * MathAbs( iATR( NULL, 0, ATR, 0 ) );
          mLot     = mFreeMargin * PRESOLVE1 / ( mPriceSL / QUOTATION + PRESOLVE2 );
 
@@ -275,8 +276,15 @@ class Order {
          if ( LOT_MAX < mLot ) mLot = LOT_MAX;
          mLot = Normalize( mLot );
 
-         mTickValue = MarketInfo( NULL, MODE_TICKVALUE );            
-         mPriceTP   = FACTOR_TP * ( COMMISSION * LOT_COST * Point / mTickValue + mPriceSL );
+         mTickValue = MarketInfo( NULL, MODE_TICKVALUE );
+
+         // get SL by min Lot if SL price too expensive
+         double tick = mLot * mTickValue / Point;
+         if (MAX_PART * mFreeMargin < mPriceSL * tick + COMMISSION * LOT_COST * mLot) {
+            mPriceSL = QUOTATION * ( ( mFreeMargin * PRESOLVE1 / mLot) - PRESOLVE2 );
+         }
+
+         mPriceTP   = FACTOR_TP * MAX_PART * mFreeMargin / tick;
 
          pPrice.Update( mPriceSL, mPriceTP, Ask, Bid );
       }
@@ -500,14 +508,15 @@ class Drawer {
 input double inMaxPart    = 0.01;  //Максимальная доля от свободной маржи на сделку
 input double inTakeProfit = 2.0;   //Профит (доля от суммы сделки)
 input double inCommission = 0.01;  //Комиссия (доля от стоимости 1 лота в базовой валюте)
-input double inStopLoss   = 2.0;   //Стоп лосс (доля от ATR(14))
+input double inStopLoss   = 2.0;   //Стоп лосс (доля от ATR)
+input int    inATRPeriod  = 50;    //Период ATR
 input bool   inAsk        = true;  //Подтверждение открытия сделки
 
 Order  * gOrder;
 Drawer * gDrawer;
 
 int OnInit() {
-   gOrder  = new Order( inMaxPart, inTakeProfit, inCommission, inStopLoss );
+   gOrder  = new Order( inMaxPart, inTakeProfit, inCommission, inStopLoss, inATRPeriod );
    gDrawer = new Drawer( gOrder, inAsk );
 
    if ( EventSetMillisecondTimer( 500 ) ) {
